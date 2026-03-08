@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -79,8 +80,10 @@ def load_data(path: Path) -> pd.DataFrame:
         raise ValueError(f"Missing required columns: {sorted(miss)}")
 
     out = df.copy()
-    out["heavy"] = out["heavy"].astype(str).str.strip().str.upper()
-    out["light"] = out["light"].astype(str).str.strip().str.upper()
+    out["heavy"] = out["heavy"].fillna("").astype(str).str.strip().str.upper()
+    out["light"] = out["light"].fillna("").astype(str).str.strip().str.upper()
+    out["heavy"] = out["heavy"].replace({"NAN": "", "NONE": "", "NULL": ""})
+    out["light"] = out["light"].replace({"NAN": "", "NONE": "", "NULL": ""})
     out["pair_id"] = out["pair_id"].astype(str)
     out["y"] = pd.to_numeric(out["y"], errors="raise")
 
@@ -118,18 +121,21 @@ def embed_seq(model: torch.nn.Module, device: torch.device, tok2id: dict[str, in
 
 
 def compute_or_load_chain_cache(df: pd.DataFrame, args: argparse.Namespace) -> dict[str, np.ndarray]:
-    all_chains = pd.concat([df["heavy"], df["light"]], ignore_index=True).drop_duplicates().tolist()
+    heavy_unique = df["heavy"].drop_duplicates().tolist()
+    light_unique = df["light"].drop_duplicates().tolist()
+    need_keys = {f"H::{s}" for s in heavy_unique} | {f"L::{s}" for s in light_unique}
 
     if args.cache_npz.exists() and args.cache_map.exists() and not args.recompute_embeddings:
         npz = np.load(args.cache_npz, allow_pickle=True)
         key_to_seq = json.loads(args.cache_map.read_text())
-        seq2emb = {seq: np.asarray(npz[k], dtype=np.float32) for k, seq in key_to_seq.items()}
-        if set(all_chains).issubset(set(seq2emb.keys())):
-            print(f"Loaded chain cache: {len(seq2emb)} chains")
+        seq2emb = {seq_key: np.asarray(npz[k], dtype=np.float32) for k, seq_key in key_to_seq.items()}
+        if need_keys.issubset(set(seq2emb.keys())):
+            print(f"Loaded chain cache: {len(seq2emb)} role-aware chain embeddings")
             return seq2emb
         print("Existing cache incomplete for current data; recomputing cache.")
 
-    print(f"Computing IgLM embeddings for {len(all_chains)} unique chains...")
+    total_needed = len(need_keys)
+    print(f"Computing IgLM embeddings for {total_needed} role-aware chains...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = transformers.GPT2LMHeadModel.from_pretrained(CHECKPOINT_DICT[args.model_name]).to(device)
     model.eval()
@@ -137,25 +143,19 @@ def compute_or_load_chain_cache(df: pd.DataFrame, args: argparse.Namespace) -> d
 
     seq2emb: dict[str, np.ndarray] = {}
     failures = 0
-    for i, seq in enumerate(all_chains, start=1):
-        # Heuristic: most heavy chains start with EVQ/QVQ/VQL; otherwise try light token.
-        likely_heavy = seq.startswith(("EVQ", "QVQ", "VQL", "EAQ"))
-        token_order = [args.chain_token_heavy, args.chain_token_light] if likely_heavy else [args.chain_token_light, args.chain_token_heavy]
-
-        ok = False
-        for chain_token in token_order:
-            try:
-                seq2emb[seq] = embed_seq(model, device, tok2id, seq, chain_token, args.species_token)
-                ok = True
-                break
-            except Exception:
-                continue
-
-        if not ok:
+    tasks: list[tuple[str, str]] = []
+    tasks.extend([("H", s) for s in heavy_unique])
+    tasks.extend([("L", s) for s in light_unique])
+    for i, (role, seq) in enumerate(tasks, start=1):
+        key = f"{role}::{seq}"
+        token = args.chain_token_heavy if role == "H" else args.chain_token_light
+        try:
+            seq2emb[key] = embed_seq(model, device, tok2id, seq, token, args.species_token)
+        except Exception:
             failures += 1
 
-        if i % 100 == 0 or i == len(all_chains):
-            print(f"  embedded {i}/{len(all_chains)} (failures={failures})")
+        if i % 100 == 0 or i == len(tasks):
+            print(f"  embedded {i}/{len(tasks)} (failures={failures})")
 
     if not seq2emb:
         raise RuntimeError("No embeddings were computed")
@@ -177,8 +177,8 @@ def compute_or_load_chain_cache(df: pd.DataFrame, args: argparse.Namespace) -> d
 def build_features(df: pd.DataFrame, seq2emb: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     xs, ys, idx = [], [], []
     for i, r in df.iterrows():
-        h = seq2emb.get(r["heavy"])
-        l = seq2emb.get(r["light"])
+        h = seq2emb.get(f"H::{r['heavy']}")
+        l = seq2emb.get(f"L::{r['light']}")
         if h is None or l is None:
             continue
         xs.append(np.concatenate([h, l]).astype(np.float32))
@@ -365,7 +365,10 @@ def main() -> None:
         "best_iteration": int(best["best_iteration"]),
     }
 
-    out_metrics = args.out_dir / "metrics_expression_iglm_xgboost.csv"
+    holdout_raw = Path(args.holdout_assay).stem if args.holdout_assay else "none"
+    holdout_tag = re.sub(r"[^a-zA-Z0-9_.-]+", "_", holdout_raw)
+    data_tag = re.sub(r"[^a-zA-Z0-9_.-]+", "_", args.data_csv.stem)
+    out_metrics = args.out_dir / f"metrics_expression_iglm_xgboost_{data_tag}_holdout_{holdout_tag}.csv"
     pd.DataFrame([results]).to_csv(out_metrics, index=False)
 
     print("Expression IgLM+XGBoost run complete")

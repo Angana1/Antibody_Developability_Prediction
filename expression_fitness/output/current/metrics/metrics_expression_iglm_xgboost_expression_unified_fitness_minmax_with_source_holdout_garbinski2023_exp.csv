@@ -1,0 +1,2 @@
+n_total,n_train,n_val,n_test,holdout_assay,test_mae,test_rmse,test_r2,best_max_depth,best_learning_rate,best_subsample,best_colsample_bytree,best_reg_lambda,best_iteration
+15476,12750,2632,94,garbinski2023_exp.csv,0.2507992088794708,0.2916233539581299,-0.01578503372821527,6,0.05,0.8,0.8,2.0,336
