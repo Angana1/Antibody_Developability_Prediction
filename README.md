@@ -1,6 +1,6 @@
 # 🧬 Antibody Developability Prediction
 ## Protein Design Hackathon, EPFL 
-## Members: Angana, Annabelle, Onur
+## Team Members: Angana, Annabelle, Onur
 
 ## Project Overview
 This project focuses on predicting antibody developability factors, namely thermostability and expression, using language model embeddings and machine learning pipelines. The goal is to evaluate antibody candidates early in the discovery pipeline without time-consuming, expensive wet lab tests. By leveraging bioinformatics, machine learning, and antibody sequence representations, our model helps researchers prioritize antibody candidates across multiple studies (cross-domain). 
