@@ -13,4 +13,4 @@ We collected cross-domain antibody sequence data for thermostability and express
 ### Key findings
 By utilising cross-domain hyperparameter tuning and out-of-distribution testing using multiple studies, we were able to achieve generalisable results for antibody fitness prediction. More interestingly, our ML model showed better cross-study generalisability when predicting aggregate developability scores (combination of thermostability and expressability) across studies, as compared to individual developability scores. Our results showed promising future avenues for cross-study generalisation of machine learning models for antibody fitness prediction.
 
-This project was developed during the above hackathon for a project at Gray Lab, Johns Hopkins University, where interdisciplinary teams collaborated to design innovative solutions for biotechnology and drug discovery challenges.
+This project was developed during the above hackathon where interdisciplinary teams collaborated to design innovative solutions for biotechnology and drug discovery challenges.
